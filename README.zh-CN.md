@@ -25,6 +25,7 @@
 | 对话太长，早期消息被挤出上下文 | Agent 会忘记早期的重要要求 | 只要已经写入 MemoryOS，原聊天不在窗口里也能找回 |
 | 同时维护多个仓库 | 记忆容易串项目 | 每次读取和写入都固定在指定仓库范围内 |
 | 想知道插件到底花了多少 Token | 很难区分模型、工具和重试开销 | 分开记录工具 Schema、模型实际看到的记忆和 Provider 精确输入 |
+| 临时不想使用长期记忆 | 要改环境变量并重启 | 直接对 Agent 说“关闭 OS”；要恢复就说“开启 OS” |
 
 适合保存的内容包括：
 
@@ -43,6 +44,13 @@
 3. 插件只向本机 MemoryOS 查询当前仓库的记忆。
 4. MemoryOS 先处理新旧冲突，再把尽量短的“当前有效结论”返回给 Agent。
 5. Agent 继续查看代码、修改和运行测试。记忆只是证据，不代替代码核对。
+
+第一次成功取到记忆上下文时，Agent 会主动告诉你：
+
+> MemoryOS 已开始工作，正在为当前项目提供跨会话记忆。你随时可以直接说
+> “关闭 OS”；需要恢复时说“开启 OS”即可。
+
+这条提示只出现一次。它表示插件确实完成了一次有效调用，不只是“安装命令跑完了”。
 
 默认模式是**只读**，插件不会擅自把所有对话都存起来。只有明确开启
 `cross-session-write` 后，Agent 才会获得 `memory_propose` 和
@@ -72,7 +80,7 @@
 源码目录启动本地服务：
 
 ```console
-python -m memoryos --data-dir ./data serve --no-open
+python -m memoryos --data-dir ./data serve --port 8000 --no-open
 ```
 
 ### 2. 安装插件
@@ -81,7 +89,7 @@ python -m memoryos --data-dir ./data serve --no-open
 `47f943859bef60e4160492346772ded9b24f765a`。
 
 ```console
-dsh plugin --profile memoryos add github:tianhao8687/dsh-memoryos#v0.1.18
+dsh plugin --profile memoryos add github:tianhao8687/dsh-memoryos#v0.2.0
 dsh --profile memoryos --dump-config
 ```
 
@@ -93,7 +101,6 @@ Git 插件安装可能执行包生命周期代码，高可信环境建议审阅�
 先从“短上下文、每个 Session 最多调用一次”开始：
 
 ```powershell
-$env:MEMORYOS_ENABLED = '1'
 $env:MEMORYOS_BASE_URL = 'http://127.0.0.1:8000'
 $env:MEMORYOS_AUTH_TOKEN = '<本地-memoryos-token>'
 $env:MEMORYOS_CONDITION = 'msc_context_only'
@@ -106,6 +113,33 @@ dsh --profile memoryos
 这套配置的目标不是塞给模型越多历史越好，而是先给它一份够用、可执行、当前有效的
 项目摘要。模型和 Provider 仍由 DSH 配置；插件不会读取或改写
 `DEEPSEEK_API_KEY`。
+
+只要你是有意安装这个插件，首次启动默认就是开启状态；如果你上次说过“关闭 OS”，
+插件会记住这个选择，重启后仍保持关闭。
+
+## 直接打字开关，不需要快捷方式
+
+在和 Agent 的正常对话里直接说：
+
+```text
+关闭 OS
+开启 OS
+OS 现在开着吗？
+```
+
+模型会调用 `memoryos_control` 工具执行真实开关，不是只回复一句“好的”。
+
+- 说“关闭 OS”后，插件会立即撤下读取、解释和写入记忆的工具，后续请求不再使用
+  MemoryOS；只留下一个很小的控制工具，保证你以后还能说“开启 OS”。
+- 说“开启 OS”后，插件先检查本机 MemoryOS 服务是否正常；检查成功才恢复记忆工具，
+  服务没启动时不会假装开启。
+- 开关状态会原子写入本地状态文件，关闭 DSH 或重启电脑后仍然有效。
+- 已经进入当前聊天记录的旧记忆无法倒着删除。如果要完全干净的上下文，关闭后再新建
+  Session。
+
+严格 A/B 测试的 `MEMORYOS_CONDITION=no_memory` 是例外：它连控制工具都不加载，
+MemoryOS Schema 数量为零。这个模式不能在当前进程里靠聊天重新开启，需要换回其他模式
+并重启；这样才能保证无记忆基线没有额外 Schema。
 
 ## 记忆模式怎么选
 
@@ -125,8 +159,9 @@ Progressive 或 Full；不要因为预算上限很大就把所有历史都塞进
 
 以下不是演示文案，而是已经跑过的公开验收：
 
-- **真实安装可用**：打包后安装到锁定的 DSH RC5 Profile，在断网容器中完成
-  23/23 契约与真实 Loader/HMR 测试。
+- **真实安装可用**：打包后安装到锁定的 DSH RC5 Profile，在断网环境中 27/27
+  通过；验收覆盖自然语言持久开关、动态撤下/恢复工具、健康检查、损坏状态防误开启以及
+  严格零 Schema 基线。
 - **主要插件功能可用**：14/14 隐藏验证通过，13/14 严格模式协议通过。
 - **记忆可以更新**：Session A 确认 PostgreSQL 17，Session B 改成 18，硬重启后
   Session C 只把 18 当成当前版本。
@@ -145,7 +180,8 @@ Progressive 或 Full；不要因为预算上限很大就把所有历史都塞进
 
 会。只要给模型增加工具 Schema、工具结果或额外一轮模型调用，输入 Token 就会增加。
 这个插件的目标是让增加的 Token 换来真正有用的跨会话信息，并用 Compact 模式控制
-开销，而不是宣称“用了记忆反而零成本”。
+开销，而不是宣称“用了记忆反而零成本”。普通“关闭 OS”仍会发送那个很小的控制
+Schema；只有严格 `no_memory` A/B 基线才是零 MemoryOS Schema Token。
 
 最新 Memory Update / Context Eviction 测试的三个写入 Session 合计记录了：
 
@@ -163,7 +199,10 @@ Progressive 或 Full；不要因为预算上限很大就把所有历史都塞进
 
 | 环境变量 | 默认值 | 人话说明 |
 |---|---|---|
-| `MEMORYOS_ENABLED` | `0` | 设为 `1` 才把记忆工具交给 Agent |
+| `MEMORYOS_ENABLED` | `1` | 只决定“没有旧状态文件时”的初始状态；设为 `0` 可首次以普通关闭模式启动 |
+| `MEMORYOS_CONTROL_ENABLED` | `1` | 在非 `no_memory` 模式下给模型开关/查询状态工具 |
+| `MEMORYOS_ONBOARDING_NOTICE` | `1` | 第一次成功取到上下文时，让 Agent 告诉用户 OS 已开始工作 |
+| `MEMORYOS_STATE_FILE` | 系统配置目录 | 可选；为不同 DSH Profile 指定各自的开关状态文件 |
 | `MEMORYOS_BASE_URL` | `http://127.0.0.1:8000` | 本机 MemoryOS 服务地址 |
 | `MEMORYOS_AUTH_TOKEN` | 无 | MemoryOS 本地访问令牌 |
 | `MEMORYOS_CONDITION` | `msc_progressive` | 选择上面的记忆模式 |
@@ -183,6 +222,8 @@ Usage ledger 和受控上下文淘汰属于评测能力。普通用户不需要�
 - 记忆数据库、冲突处理、检索和 Context Compiler 都在本地 MemoryOS 服务中。
 - 插件只访问你配置的 MemoryOS 地址，不负责保存 DeepSeek API Key。
 - MemoryOS 返回的内容会进入后续模型请求，所以**不要把密码或密钥写进记忆**。
+- 开关状态文件只保存“是否开启”和“首次提示是否已经显示”，不保存记忆正文或密钥。
+- 状态文件损坏时采用安全关闭：不会悄悄把记忆工具重新打开。
 - 仓库范围由控制器固定，模型不能在写入时随意切换到另一个项目。
 - 默认只读；写入和评测专用的上下文淘汰都需要明确开启。
 
@@ -202,6 +243,9 @@ dependency。
 
 - 插件目前有意锁定 DSH RC5，不保证兼容其他版本。
 - 开关是进程级的；要同时跑有记忆和无记忆 Agent，请分别启动 DSH 进程。
+- 默认状态文件由本机启动共享。多个 Profile 要保留各自开关状态时，请给它们设置不同的
+  `MEMORYOS_STATE_FILE`。
+- “关闭 OS”只影响后续请求，不能删除已经进入当前 Session 聊天记录的记忆文本。
 - 不包含 `headless-runner` 的 Profile 在 `--dump-config` 时可能显示一条可选 resume
   overlay 的 missing-entry 警告。这不会阻止记忆工具、用量采集或 Loader/HMR 工作。
 - 受控历史淘汰只用于测试，不是生产环境的聊天压缩方案。
