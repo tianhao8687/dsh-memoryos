@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | **[中文用户：查看通俗版说明](README.zh-CN.md)**
 
 Evidence-first long-term project memory for DeepSeek Harness (DSH), powered by
 [MemoryOS](https://github.com/tianhao8687/MemoryOS).

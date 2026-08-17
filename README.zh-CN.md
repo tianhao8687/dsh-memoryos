@@ -6,47 +6,91 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-面向 DeepSeek Harness（DSH）的证据优先项目长期记忆插件，由
-[MemoryOS](https://github.com/tianhao8687/MemoryOS) 提供后端能力。
+> 一句话说明：让 DeepSeek Agent 换一个会话、重启一次，仍然知道这个项目以前
+> 做过什么决定；决定变了，它会优先拿到新的，而不是继续照着旧结论做。
 
-`dsh-memoryos` 是纯 JavaScript DSH Bundle。它把有 scope 的项目记忆工具和
-Provider 精确用量采集接入 DSH，但不会把 MemoryOS 的持久化、检索、Truth 解析或
-Context Compiler 复制进 Agent 进程。
+`dsh-memoryos` 是 DeepSeek Harness（DSH）的长期项目记忆插件，记忆能力由
+[MemoryOS](https://github.com/tianhao8687/MemoryOS) 提供。
 
-> 当前有意锁定 DeepSeek Harness `0.1.0-rc.5`，commit 为
-> `47f943859bef60e4160492346772ded9b24f765a`。DSH 仍是 developer preview；
-> 升级前必须重跑 Loader 与契约验收。
+它不是给模型“凭空加智商”，而是给模型一份能跨会话保存、按项目隔离、可以更新、
+有来源可查的项目记忆。它尤其适合需要连续工作几天、经历多个 Session，或者经常要
+把任务交给新 Agent 继续做的项目。
 
-## 为什么使用它
+## 它到底有什么用
 
-- 真正的 `no_memory` 对照不暴露任何 MemoryOS 工具 Schema，同时保留相同且模型不可见的用量采集器。
-- Full、Compact、Progressive、Explain 和 Delta 模式共享同一个 repository scope MemoryOS 服务。
-- 显式写入 Profile 能跨 Session 保存原子化、有对话证据的决定，并用 `supersede`、`keep_both` 或 `reject` 处理更新。
-- Provider 精确输入/输出/缓存用量与 MemoryOS 组件估算严格分开。
-- 默认保持只读；评测写入和受控上下文淘汰都必须显式开启。
+| 真实场景 | 没有长期记忆 | 使用 dsh-memoryos |
+|---|---|---|
+| 重启后继续项目 | Agent 不知道上次定了什么，要重新解释 | Agent 可以主动查询上次确认过的决定 |
+| 技术决定发生变化 | 旧版和新版信息容易混在一起 | 旧记录会被标记为已替换，当前结论只保留新版 |
+| 对话太长，早期消息被挤出上下文 | Agent 会忘记早期的重要要求 | 只要已经写入 MemoryOS，原聊天不在窗口里也能找回 |
+| 同时维护多个仓库 | 记忆容易串项目 | 每次读取和写入都固定在指定仓库范围内 |
+| 想知道插件到底花了多少 Token | 很难区分模型、工具和重试开销 | 分开记录工具 Schema、模型实际看到的记忆和 Provider 精确输入 |
 
-## 安装
+适合保存的内容包括：
+
+- 已确定的数据库版本、API 约定和兼容性要求；
+- 为什么选择或放弃某个实现方案；
+- 关键代码位置、已完成的验证和仍未解决的问题；
+- 下一次 Session 接手时必须知道的项目事实。
+
+不建议保存密码、API Key、大段日志、未经验证的猜测，或者可以随时从代码里快速
+查到的普通信息。
+
+## 用了以后，Agent 会怎么工作
+
+1. DSH 把 `memory_context` 工具交给 Agent。
+2. Agent 认为需要项目历史时，自己调用这个工具；用户不需要每次都输入“请回忆”。
+3. 插件只向本机 MemoryOS 查询当前仓库的记忆。
+4. MemoryOS 先处理新旧冲突，再把尽量短的“当前有效结论”返回给 Agent。
+5. Agent 继续查看代码、修改和运行测试。记忆只是证据，不代替代码核对。
+
+默认模式是**只读**，插件不会擅自把所有对话都存起来。只有明确开启
+`cross-session-write` 后，Agent 才会获得 `memory_propose` 和
+`memory_confirm` 两个写入工具。模型根据当前对话提出候选记忆，再经过确认写入；
+遇到冲突时可以替换旧结论、保留两者或拒绝新结论。
+
+## 哪些情况最值得装
+
+- 中等或长期编程任务，需要多次启动 Agent 才能完成；
+- 项目有很多不能只靠代码猜出的历史决定；
+- 多个 Agent 或多人轮流接手同一仓库；
+- 想做严格的有记忆/无记忆 A/B 测试；
+- 需要知道记忆工具、重试和模型请求分别用了多少 Token。
+
+以下情况收益通常不大：
+
+- 一次对话就能完成的简单修改；
+- 项目没有需要跨会话保留的信息；
+- 只是希望插件自动提高所有题目的修复成功率；
+- 不愿意运行本地 MemoryOS 服务。
+
+## 快速安装
 
 ### 1. 启动 MemoryOS
 
-本仓库只是 DSH 适配器，不是数据库。从 MemoryOS 2.3 源码目录启动本地服务：
+这个仓库是 DSH 适配器，真正保存和整理记忆的是 MemoryOS 2.3。从 MemoryOS
+源码目录启动本地服务：
 
 ```console
 python -m memoryos --data-dir ./data serve --no-open
 ```
 
-### 2. 安装 DSH Bundle
+### 2. 安装插件
 
-使用 Release tag 保持可复现：
+当前版本锁定 DeepSeek Harness `0.1.0-rc.5`，对应 commit
+`47f943859bef60e4160492346772ded9b24f765a`。
 
 ```console
 dsh plugin --profile memoryos add github:tianhao8687/dsh-memoryos#v0.1.18
 dsh --profile memoryos --dump-config
 ```
 
-高可信环境应把 tag 换成审计过的准确 commit SHA。Git 插件安装可能执行包生命周期代码，请先审阅再固定版本。
+DSH 仍处于 developer preview。升级 DSH 前，请重新运行 Loader 和契约测试。
+Git 插件安装可能执行包生命周期代码，高可信环境建议审阅后固定到准确 commit SHA。
 
-### 3. 开启只读记忆
+### 3. 第一次使用的推荐配置
+
+先从“短上下文、每个 Session 最多调用一次”开始：
 
 ```powershell
 $env:MEMORYOS_ENABLED = '1'
@@ -59,75 +103,90 @@ $env:MEMORYOS_RESPONSE_FORMAT = 'deepseek-compact'
 dsh --profile memoryos
 ```
 
-Bundle 不会选择或改写 `agent-default-model`，模型与 Provider 仍由 DSH 配置。插件不读取 `DEEPSEEK_API_KEY`，该密钥由 DSH 管理。
+这套配置的目标不是塞给模型越多历史越好，而是先给它一份够用、可执行、当前有效的
+项目摘要。模型和 Provider 仍由 DSH 配置；插件不会读取或改写
+`DEEPSEEK_API_KEY`。
 
-## 模式
+## 记忆模式怎么选
 
-| 条件 | 模型可见记忆面 | 用途 |
+| 模式 | 人话解释 | 建议用途 |
 |---|---|---|
-| `no_memory` | 无 | 匹配基线，只保留用量采集 |
-| `legacy_full` | 完整旧版上下文 | 兼容性实验 |
-| `msc_full` | 单次 Minimum Sufficient Context | 一般已解析项目上下文 |
-| `msc_progressive` | 紧凑索引 + 按需 Explain | 多记录或证据密集任务 |
-| `msc_context_only` | 一次无参数紧凑调用 | 有界 DeepSeek 编程 Session |
-| `msc_delta` / `msc_delta_core` | Full 后接 Delta | 上下文变化的长任务 |
+| `no_memory` | 完全不给模型记忆工具 | 做公平的无记忆基线 |
+| `msc_context_only` | 一次拿到短小的当前结论 | **普通用户建议从这里开始** |
+| `msc_progressive` | 先看目录，必要时再展开证据 | 多条记录或复杂历史 |
+| `msc_full` | 一次返回较完整的项目记忆 | 需要完整上下文的受控实验 |
+| `msc_delta` / `msc_delta_core` | 先拿完整内容，之后只拿变化 | 很长且持续变化的 Session |
+| `legacy_full` | 旧版完整上下文 | 兼容性测试，不建议新项目默认使用 |
 
-可选 `cross-session-write` Profile 增加 `memory_propose` 和 `memory_confirm`。每次 proposal 必须只有一个可独立更新事实、一个稳定 semantic key 和一段对话证据，repository scope 由控制器固定。普通使用保持默认 `read-only`。
+如果只是日常使用，优先选择 `msc_context_only`。只有在确实缺少证据时，再尝试
+Progressive 或 Full；不要因为预算上限很大就把所有历史都塞进模型。
 
-## 架构
+## 实际效果和测试结果
 
-| Cordis 组件 | 挂载条件 | 模型可见影响 |
+以下不是演示文案，而是已经跑过的公开验收：
+
+- **真实安装可用**：打包后安装到锁定的 DSH RC5 Profile，在断网容器中完成
+  23/23 契约与真实 Loader/HMR 测试。
+- **主要插件功能可用**：14/14 隐藏验证通过，13/14 严格模式协议通过。
+- **记忆可以更新**：Session A 确认 PostgreSQL 17，Session B 改成 18，硬重启后
+  Session C 只把 18 当成当前版本。
+- **聊天窗口忘了，长期记忆还在**：原消息被确认移出活动上下文后，无记忆 Agent
+  回答“不知道”，MemoryOS Agent 找回了 `Glacier-47`。
+- **项目隔离有效**：跨会话测试里的错误仓库范围没有读到目标项目的记忆。
+- **结果并非全胜**：第一版跨会话严格验收仍然是 2/3，其中一项中文连续文本的
+  来源词匹配失败；这个失败没有被改写成通过。
+- **没有夸大成功率**：编程 A/B/C 测试看到过单题 Token 和成本改善，但目前不能
+  证明它普遍提高代码修复成功率。
+
+完整数据、失败过程和修复记录见
+[测试、失败、修复与结论边界](docs/TESTS_AND_RESULTS.md)。
+
+## Token 会不会增加
+
+会。只要给模型增加工具 Schema、工具结果或额外一轮模型调用，输入 Token 就会增加。
+这个插件的目标是让增加的 Token 换来真正有用的跨会话信息，并用 Compact 模式控制
+开销，而不是宣称“用了记忆反而零成本”。
+
+最新 Memory Update / Context Eviction 测试的三个写入 Session 合计记录了：
+
+| 指标 | Token | 它代表什么 |
+|---|---:|---|
+| `write_tool_schema_tokens` | 1,794 | 写入工具 Schema 的估算量 |
+| `memory_write_visible_tokens` | 7,779 | 写入过程中模型实际看到的 MemoryOS 内容估算量 |
+| `provider_input_tokens` | 103,687 | Provider 返回的精确输入量 |
+
+前两项是 `unicode-heuristic-v1` 估算，只有第三项是 Provider 精确值，三者不能混在
+一起宣称“节省了多少”。增加工具也会改变 Provider 可见请求，因此可能改变 KV Cache
+命中；模型不可见的用量采集器本身不会增加提示词或工具 Schema。
+
+## 常用配置
+
+| 环境变量 | 默认值 | 人话说明 |
 |---|---|---|
-| `dsh-memoryos/usage` | 始终 | 无；记录请求尝试与 Provider usage |
-| `dsh-memoryos` | `MEMORYOS_ENABLED=1` | 注册选定的记忆工具 |
-| `dsh-memoryos/resume` | 配置 resume session id | 为受控续跑替换 headless runner |
+| `MEMORYOS_ENABLED` | `0` | 设为 `1` 才把记忆工具交给 Agent |
+| `MEMORYOS_BASE_URL` | `http://127.0.0.1:8000` | 本机 MemoryOS 服务地址 |
+| `MEMORYOS_AUTH_TOKEN` | 无 | MemoryOS 本地访问令牌 |
+| `MEMORYOS_CONDITION` | `msc_progressive` | 选择上面的记忆模式 |
+| `MEMORYOS_BUDGET_TOKENS` | `6000` | 一次最多返回多少记忆；建议先用 512 |
+| `MEMORYOS_MAX_CONTEXT_CALLS` | 不限 | 每个 Session 最多查几次；`0` 表示不限 |
+| `MEMORYOS_RESPONSE_FORMAT` | `json` | 返回 JSON、DeepSeek compact 或 progressive compact |
+| `MEMORYOS_TOOL_PROFILE` | `read-only` | 默认只读；写入需显式选择 `cross-session-write` |
+| `MEMORYOS_REPOSITORY` | 无 | 固定项目范围；开启写入时必须设置 |
+| `MEMORYOS_TASK` | 无 | 当前任务说明，由控制器提供 |
+| `MEMORYOS_TIMEOUT_MS` | `30000` | 等待本地 MemoryOS 的最长时间 |
 
-Bundle 只访问配置的 loopback MemoryOS HTTP 服务。SQLite、迁移、检索、Current Truth、冲突关系和 Context Compiler 仍属于 MemoryOS。详见[架构与耦合](docs/ARCHITECTURE.md)。
+Usage ledger 和受控上下文淘汰属于评测能力。普通用户不需要开启；如果要做实验，请先
+阅读 [`cordis.patch.yml`](cordis.patch.yml) 和[架构说明](docs/ARCHITECTURE.md)。
 
-## 模型实际体验
+## 数据和安全
 
-### 模型能看到什么
+- 记忆数据库、冲突处理、检索和 Context Compiler 都在本地 MemoryOS 服务中。
+- 插件只访问你配置的 MemoryOS 地址，不负责保存 DeepSeek API Key。
+- MemoryOS 返回的内容会进入后续模型请求，所以**不要把密码或密钥写进记忆**。
+- 仓库范围由控制器固定，模型不能在写入时随意切换到另一个项目。
+- 默认只读；写入和评测专用的上下文淘汰都需要明确开启。
 
-插件关闭时，模型看不到 MemoryOS 工具或文本。开启后，DSH 发送选定工具 Schema；只有模型调用工具后，返回的上下文才会进入后续请求。
-
-### Token 影响
-
-输入 Token 通常会增加，因为 Schema、工具结果和新增模型轮次都是真实输入。Compact 模式只负责限制开销，不声称零成本。最新 Update/Eviction campaign 的三个写入会话合计记录为 `1,794 / 7,779 / 103,687`：分别是 Schema 估算、模型可见 MemoryOS 估算和 Provider 精确输入。
-
-### KV Cache 影响
-
-增加工具会改变 Provider 可见请求，因此会改变缓存 key；用量采集器本身不增加提示词或工具 Schema。
-
-## 已测试结果
-
-- 在离线容器中把打包产物安装到锁定的 DSH RC5 Profile 后，23/23 契约与真实 Loader/HMR 测试通过。
-- 全功能验收：14/14 隐藏验证通过，13/14 严格模式协议通过。
-- Memory Update：PostgreSQL 17 被 18 正确 supersede，新 Session 只返回 18。
-- Context Eviction A/B：原始消息确认离开活动历史后，无记忆回答“不知道”，MemoryOS 恢复 `Glacier-47`。
-- Cross-session v1 的严格结果仍是 2/3；虽然全部 recall、baseline 和错 scope 隔离臂都通过，也不改写成 3/3。
-- 编程测试出现过单题效率收益，但尚未证明普遍提高修复成功率。
-
-详见[测试、失败、修复与结论边界](docs/TESTS_AND_RESULTS.md)。
-
-## 配置
-
-| 环境变量 | 默认值 | 含义 |
-|---|---|---|
-| `MEMORYOS_ENABLED` | `0` | 设为 `1` 时挂载记忆工具 |
-| `MEMORYOS_BASE_URL` | `http://127.0.0.1:8000` | 本地 MemoryOS 地址 |
-| `MEMORYOS_AUTH_TOKEN` | 无 | 本地 MemoryOS bearer token |
-| `MEMORYOS_CONDITION` | `msc_progressive` | 上下文交付模式 |
-| `MEMORYOS_BUDGET_TOKENS` | `6000` | MemoryOS 响应预算 |
-| `MEMORYOS_MAX_CONTEXT_CALLS` | 不限 | 每 Session 调用上限；`0` 表示不限 |
-| `MEMORYOS_RESPONSE_FORMAT` | `json` | JSON、DeepSeek compact 或 progressive compact |
-| `MEMORYOS_TOOL_PROFILE` | `read-only` | `read-only` 或显式 `cross-session-write` |
-| `MEMORYOS_REPOSITORY` | 无 | 固定 repository scope；写入时必需 |
-| `MEMORYOS_TASK` | 无 | 控制器提供的任务说明 |
-| `MEMORYOS_TIMEOUT_MS` | `30000` | 本地 MemoryOS 超时 |
-
-Usage ledger 和受控淘汰变量属于评测基础设施，开启前请阅读 [`cordis.patch.yml`](cordis.patch.yml) 和架构文档。
-
-## 验证与移除
+## 验证和卸载
 
 ```console
 node --test tests/contract.test.mjs tests/loader-composition.test.mjs
@@ -135,14 +194,18 @@ dsh --profile memoryos --dump-config
 dsh plugin --profile memoryos remove dsh-memoryos
 ```
 
-当 `DSH_TEST_PROFILE_DIR` 指向已安装的 RC5 profile 时，Loader/HMR 测试会真实运行。开发脚本会先打 tarball 再安装；直接目录安装会变成 `link:` dependency，不受支持。
+当 `DSH_TEST_PROFILE_DIR` 指向已经安装的 RC5 Profile 时，Loader/HMR 测试会走真实
+DSH Loader。开发时应先打 tarball 再安装；直接安装目录会变成不受支持的 `link:`
+dependency。
 
-## 已知限制
+## 目前的限制
 
-- 开关是进程级的；并发的开启/关闭 Agent 应使用不同 DSH 进程。
-- 插件有意耦合 RC5 Cordis 生命周期与事件面。
-- 不包含 `headless-runner` 的 Profile 在 `--dump-config` 时可能对可选 resume overlay 输出非致命的 missing-entry 警告；记忆工具、用量采集和 Loader/HMR 组合仍可通过。该 overlay 仅用于受控续跑评测。
-- 受控历史淘汰仅用于评测。
-- 记忆是证据，不是跳过代码核对与测试的权威。
+- 插件目前有意锁定 DSH RC5，不保证兼容其他版本。
+- 开关是进程级的；要同时跑有记忆和无记忆 Agent，请分别启动 DSH 进程。
+- 不包含 `headless-runner` 的 Profile 在 `--dump-config` 时可能显示一条可选 resume
+  overlay 的 missing-entry 警告。这不会阻止记忆工具、用量采集或 Loader/HMR 工作。
+- 受控历史淘汰只用于测试，不是生产环境的聊天压缩方案。
+- 记忆可能过期或记录错误。涉及代码的结论仍然必须查看当前代码并运行测试。
 
-另见 [SECURITY.md](SECURITY.md)、[CONTRIBUTING.md](CONTRIBUTING.md) 与 [MIT License](LICENSE)。
+另见 [SECURITY.md](SECURITY.md)、[CONTRIBUTING.md](CONTRIBUTING.md) 和
+[MIT License](LICENSE)。
