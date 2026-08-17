@@ -8,7 +8,8 @@ This page is the public plugin-level result index.
 
 | Evaluation | Result | Supported conclusion |
 |---|---|---|
-| Packaged RC5 Loader/HMR smoke | 23/23 tests passed after tarball install in a network-disabled container | The published bundle composes through the real locked DSH Loader; a base profile may still emit the documented non-fatal optional `headless-runner` patch warning |
+| Packaged RC5 Loader/HMR smoke | 27/27 tests passed after installing the `0.2.0` tarball in a network-disabled container | The bundle composes through the real locked DSH Loader; ordinary off retains only control, strict `no_memory` has zero MemoryOS schemas, dynamic HMR restoration works, and usage remains mounted |
+| Natural-language persistent control | PASS: exact Chinese triggers are present; disable/status/health-checked enable execute; state survives restart; corrupt state fails closed; first-success notice is one-time | Users can control MemoryOS by speaking to the model without a shortcut; this proves the tool contract and lifecycle, not that every model will obey every paraphrase |
 | Full plugin acceptance | 14/14 hidden validations; 13/14 strict protocols | Install, disable, Full, Progressive, Explain, Delta, usage, cache evidence, isolation, and Loader paths work |
 | Medium A/B/C v1 | A and C passed; C used 16.20% fewer input tokens and 21.85% lower cost than A; B remained unpassed at 298 attempts | One-task Progressive efficiency and focus signal; no success-rate claim |
 | Medium A/B/C v2 | A/B/C all produced no patch | Earlier diagnosis did not become implementation; no quality gain |
@@ -48,6 +49,8 @@ output, and 2,206 reasoning tokens. The first two columns use the declared
 | Progressive reasoning spiked after correct retrieval | Agent continued historical/upstream/dependency investigation; reasoning was replayed in later input | Compress payloads and add state-based action-ready/offline fallback; issue is reduced but not claimed solved |
 | Chinese recall missed continuous text | FTS5 `unicode61` lacked useful word boundaries | Add bounded CJK n-gram/LIKE fallback in MemoryOS with scope and history guards |
 | “Eviction” could still leave the source in active context | Filler alone did not force a 1M-window model to forget | Add audited, evaluation-only complete-turn surface replacement and sentinel checks |
+| A zero-schema ordinary off mode could not be re-enabled from chat | With no model-visible control capability, the Agent has nothing executable behind “开启 OS” | Split states: ordinary off keeps only `memoryos_control`; strict A/B `no_memory` remains the separate zero-schema Loader condition |
+| Re-enable could be reported while the backend was unavailable | Restoring schemas alone did not prove MemoryOS could serve requests | Require `/api/health` to return `ok=true` before mounting memory tools; failures remain off |
 
 ## What is not proven
 

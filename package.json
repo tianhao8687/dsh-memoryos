@@ -1,6 +1,6 @@
 {
   "name": "dsh-memoryos",
-  "version": "0.1.18",
+  "version": "0.2.0",
   "description": "Evidence-first long-term project memory for DeepSeek Harness",
   "type": "module",
   "main": "index.js",
