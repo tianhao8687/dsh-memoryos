@@ -30,6 +30,32 @@ retrieval, truth resolution, or context compilation into the Agent process.
 - Defaults remain read-only. Evaluation writes and controlled context eviction
   require explicit opt-in.
 
+## Evidence-first differentiation
+
+Many DSH memory plugins already have useful unit, integration, smoke, or package
+verification. `dsh-memoryos` does not claim that having tests is unique. Its
+focus is a stricter layer of **controlled real-Agent evidence** around the memory
+claims themselves:
+
+- a true `no_memory` baseline with zero model-visible MemoryOS schemas;
+- normal development conversations where the Agent must write memory through
+  the plugin rather than controller-side seeding or repair;
+- hard restarts of the Agent/MCP/MemoryOS process chain followed by fresh-session
+  recall from persistent storage;
+- wrong-scope negative controls that must recover none of the target canaries;
+- Current Truth update tests where a newer fact supersedes an older fact and a
+  fresh session receives only the active truth;
+- controlled context-eviction A/B tests proving the original turn is absent from
+  retained history before comparing `no_memory` with MemoryOS recall;
+- Provider-exact input/output/cache usage recorded separately from estimated
+  MemoryOS schema and visible-memory attribution;
+- explicit claim boundaries: a passing memory mechanism is not relabeled as a
+  generalized coding-success or token-efficiency improvement without matching
+  evidence.
+
+The goal is not to win by feature count. It is to make each memory claim
+reproducible, falsifiable, and scoped to the evidence that actually passed.
+
 ## Install
 
 ### 1. Run MemoryOS
