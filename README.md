@@ -1,121 +1,186 @@
-# MemoryOS for DeepSeek Harness
+# dsh-memoryos
 
-Thin, installable DeepSeek Harness bundle with two independent Cordis components:
+[![CI](https://github.com/tianhao8687/dsh-memoryos/actions/workflows/ci.yml/badge.svg)](https://github.com/tianhao8687/dsh-memoryos/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 
-- `memoryos-usage` records exact successful-response usage and a separate pre-dispatch provider-attempt ledger for both baseline and MemoryOS runs. Retries therefore consume the Harness request ceiling even when no usage object is returned. An optional controller-owned `MEMORYOS_USAGE_GUARD_FILE` is checked synchronously before attempt accounting and provider dispatch. It contributes no prompt text or tool schema.
-- `memoryos-tools` exposes `memory_context` and, for progressive/delta conditions, `memory_explain`. It is mounted only when `MEMORYOS_ENABLED=1`. Its default `read-only` tool profile is unchanged.
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-The split gives the `no_memory` baseline zero MemoryOS tool-schema tokens while preserving the same usage collector in both arms.
-It targets Harness `0.1.0-rc.5` at commit
-`47f943859bef60e4160492346772ded9b24f765a` and fails loudly when the required
-tool/event surfaces are absent.
+Evidence-first long-term project memory for DeepSeek Harness (DSH), powered by
+[MemoryOS](https://github.com/tianhao8687/MemoryOS).
 
-For `msc_progressive`, the DeepSeek adapter selects
-`deepseek-progressive-compact`. The plugin still exposes both `memory_context`
-and `memory_explain`. When the index contains exactly one resolved record,
-`memory_context` expands it inside the local MemoryOS call and returns one
-action-ready contract; the model does not need a separate synthesis call. A
-multi-record or unresolved index keeps selective `memory_explain`, whose schema
-is reduced to the exact `UUID @ SHA256` handle shown in the index. Both paths
-remove volatile ids and accounting metadata, preserve repository-local anchors,
-normalize contradictory unknown freshness, and keep implementation choices
-separate from resolved behavioral constraints.
+`dsh-memoryos` is a plain-JavaScript DSH Bundle. It adds scoped project-memory
+tools and exact Provider-usage collection without moving MemoryOS persistence,
+retrieval, truth resolution, or context compilation into the Agent process.
 
-The action-ready contract also declares that external lookup is unnecessary,
-provides a validation fallback for offline or dependency-limited workspaces, and
-defines when investigation should be reopened. After a resolved contract and a
-successful local inspection, the plugin may add one generic recovery notice if
-a tool reports an offline/missing-dependency failure while `git status` still
-shows a clean worktree. The notice is emitted at most once per session. It has
-no fixed step number and contains no repository-, task-, dependency-, provider-,
-or model-specific answer.
+> Compatibility is intentionally pinned to DeepSeek Harness `0.1.0-rc.5` at
+> commit `47f943859bef60e4160492346772ded9b24f765a`. DSH is a developer preview;
+> re-run Loader and contract acceptance before upgrading it.
 
-Start the MemoryOS HTTP service with the compiler selected for the experiment,
-export its local bearer token, enable the tool component, then install the bundle:
+## Why this plugin
+
+- A true `no_memory` arm exposes zero MemoryOS tool schemas while retaining the
+  same model-invisible usage collector.
+- Full, compact, progressive, explain, and delta context modes share one
+  repository-scoped MemoryOS service.
+- An explicit write profile can capture atomic, source-backed decisions across
+  sessions and resolve updates with `supersede`, `keep_both`, or `reject`.
+- Provider-exact input/output/cache usage stays separate from estimated
+  MemoryOS component attribution.
+- Defaults remain read-only. Evaluation writes and controlled context eviction
+  require explicit opt-in.
+
+## Install
+
+### 1. Run MemoryOS
+
+This Bundle is the DSH adapter, not the database. Start MemoryOS 2.3 locally and
+keep its bearer token private. From a MemoryOS source checkout:
+
+```console
+python -m memoryos --data-dir ./data serve --no-open
+```
+
+### 2. Install the DSH Bundle
+
+Use a release tag for reproducibility:
+
+```console
+dsh plugin --profile memoryos add github:tianhao8687/dsh-memoryos#v0.1.18
+dsh --profile memoryos --dump-config
+```
+
+For higher-assurance deployments, replace the tag with the exact audited commit
+SHA. Git installs execute package lifecycle code; review and pin third-party
+plugins before installation.
+
+### 3. Enable read-only memory
 
 ```powershell
 $env:MEMORYOS_ENABLED = '1'
-$env:MEMORYOS_CONDITION = 'msc_progressive'
-$env:MEMORYOS_AUTH_TOKEN = '<local-token>'
-./scripts/install.ps1 -Profile memoryos
-dsh --profile memoryos --dump-config
+$env:MEMORYOS_BASE_URL = 'http://127.0.0.1:8000'
+$env:MEMORYOS_AUTH_TOKEN = '<local-memoryos-token>'
+$env:MEMORYOS_CONDITION = 'msc_context_only'
+$env:MEMORYOS_BUDGET_TOKENS = '512'
+$env:MEMORYOS_MAX_CONTEXT_CALLS = '1'
+$env:MEMORYOS_RESPONSE_FORMAT = 'deepseek-compact'
 dsh --profile memoryos
 ```
 
-For the baseline, use the same installation and launch configuration with
-`MEMORYOS_ENABLED=0` and `MEMORYOS_CONDITION=no_memory`. The usage component
-remains active; `memory_context` and `memory_explain` are absent from the model's
-tool list. The bundle never changes `agent-default-model`; choose the provider and
-model in Harness itself or in the benchmark runtime.
+The Bundle never selects or rewrites `agent-default-model`. Configure the model
+and Provider in DSH. It does not read `DEEPSEEK_API_KEY`; DSH owns that secret.
 
-The example configuration contains no provider or MemoryOS secret. The plugin
-reads the local MemoryOS token only from the configured environment variable or
-token file. SQLite, migrations, retrieval, Truth, and compilation remain in the
-MemoryOS service; this bundle does not duplicate them.
+## Modes
 
-The evaluation-only cross-session source profile is enabled explicitly with
-`MEMORYOS_TOOL_PROFILE=cross-session-write`. It adds only `memory_propose` and
-`memory_confirm`, fixes every proposal to the configured repository scope, and
-requires conversation evidence. The default remains `read-only`; existing
-baseline, context-only, progressive, and delta launches gain no write schemas.
+| Condition | Model-visible memory surface | Intended use |
+|---|---|---|
+| `no_memory` | None | Matched baseline; usage collection only |
+| `legacy_full` | Full legacy context | Compatibility experiments |
+| `msc_full` | Minimum Sufficient Context in one response | General resolved project context |
+| `msc_progressive` | Compact index plus selective explain | Evidence-heavy or multi-record work |
+| `msc_context_only` | One argument-free compact context call | Bounded DeepSeek coding sessions |
+| `msc_delta` / `msc_delta_core` | Full context followed by delta | Long sessions with changing context |
 
-Each proposal in the write profile must use a stable semantic key and contain
-one independently updateable fact. If confirmation reports a conflict, the
-plugin keeps that candidate pending, exposes the supported `supersede`,
-`keep_both`, and `reject` strategies, and blocks replacement proposals until
-the same candidate is resolved. Structured MemoryOS error codes and conflict
-ids remain visible to the Agent instead of being reduced to a bare HTTP status.
+The optional `cross-session-write` tool profile adds `memory_propose` and
+`memory_confirm`. Every proposal needs one stable semantic key, one independently
+updateable fact, and a conversation excerpt. The repository scope is fixed by
+the controller. Keep the default `read-only` profile for ordinary use unless
+the write policy has been reviewed.
 
-Provider-attempt evidence also records an estimated write-token attribution for
-the final DeepSeek-visible request. `write_tool_schema_tokens` counts one copy
-of the `memory_propose` and `memory_confirm` schemas in that request;
-`memory_write_visible_tokens` adds write-tool results already replayed on the
-visible conversation surface. The counter is explicitly identified as
-`unicode-heuristic-v1`; exact provider input remains sourced only from provider
-usage.
+## Architecture
 
-For the bounded DeepSeek coding profile, use `msc_context_only` with:
+| Cordis component | Mounted when | Model-visible effect |
+|---|---|---|
+| `dsh-memoryos/usage` | Always | None; records attempts and Provider usage |
+| `dsh-memoryos` | `MEMORYOS_ENABLED=1` | Registers the selected memory tools |
+| `dsh-memoryos/resume` | A resume session id is configured | Replaces the headless runner for controlled continuation |
 
-```text
-MEMORYOS_BUDGET_TOKENS=512
-MEMORYOS_MAX_CONTEXT_CALLS=1
-MEMORYOS_RESPONSE_FORMAT=deepseek-compact
-```
-
-Because task and repository are fixed by the adapter, this mode exposes an
-argument-free `memory_context` schema, permits one call, and returns only the
-context text plus a short verification reminder. It does not expose
-`memory_explain` or experiment metadata to the model.
-
-Run the keyless contract test with:
-
-```console
-npm test
-```
-
-The real Loader/HMR test uses an installed profile. Set
-`DSH_TEST_PROFILE_DIR` to that profile directory before running
-`npm run test:loader`.
-
-The install scripts deliberately pack a tarball before calling `dsh plugin add`.
-A direct directory install becomes a `link:` dependency, resolves ESM imports
-from the source checkout, and bypasses the profile's peer dependency graph, so
-it is not a supported deployment form.
+The Bundle communicates only with the configured loopback MemoryOS HTTP
+service. SQLite, migrations, retrieval, Current Truth, conflict relations, and
+Context Compiler logic remain in MemoryOS. See [architecture and coupling](docs/ARCHITECTURE.md).
 
 ## Model experience
 
-When disabled, the bundle adds no model-visible text or tools and therefore no
-MemoryOS input-token overhead. When enabled, Harness presents the selected
-MemoryOS tool schemas; returned context enters later requests only after a tool
-call. This intentionally increases input tokens and can change provider KV-cache
-keys. The DeepSeek compact mode bounds that increase but does not claim zero
-overhead. The usage collector itself is model-invisible in both conditions.
+### What the model sees
 
-## Known limitations and deferred work
+With the plugin disabled, the model receives no MemoryOS tools or text. With it
+enabled, DSH sends the selected tool schemas. Retrieved context becomes visible
+only after the model calls a memory tool.
 
-`MEMORYOS_ENABLED` is process-wide. Concurrent enabled and disabled agents should
-use separate launches or a future agent-scoped preset, while sharing the same
-Harness installation.
+### Token effect
 
-Remove it with `./scripts/uninstall.ps1 -Profile memoryos` (or the matching
-`.sh` script).
+Input tokens normally increase because schemas, tool results, and an additional
+model turn are real input. Compact mode bounds this overhead; it does not claim
+zero cost. In the latest update/eviction campaign, the three write sessions
+recorded `1,794 / 7,779 / 103,687` total schema-estimate / visible-memory-estimate
+/ Provider-exact input tokens.
+
+### KV-cache effect
+
+Enabling a tool changes the Provider-visible request and therefore its cache
+key. The usage collector itself contributes no prompt text or tool schema.
+
+## Tested outcomes
+
+- Packaged installation against the locked DSH RC5 profile: 23/23 contract and
+  real Loader/HMR tests passed in an offline container.
+- Full plugin acceptance: 14/14 hidden validations passed; 13/14 strict mode
+  protocols passed.
+- Memory Update: PostgreSQL 17 was superseded by 18; a fresh session returned
+  only 18.
+- Context Eviction A/B: after the original turn was proven absent from active
+  history, `no_memory` answered “unknown” and MemoryOS recovered `Glacier-47`.
+- Cross-session v1 remains a strict 2/3 campaign, despite all recall, baseline,
+  and wrong-scope isolation arms passing. It is not relabeled as 3/3.
+- Coding evaluations show useful single-task efficiency signals but do not yet
+  prove generalized repair-success improvement.
+
+Read [tests, failures, fixes, and claim boundaries](docs/TESTS_AND_RESULTS.md).
+
+## Configuration
+
+| Environment variable | Default | Meaning |
+|---|---|---|
+| `MEMORYOS_ENABLED` | `0` | Mount memory tools when set to `1` |
+| `MEMORYOS_BASE_URL` | `http://127.0.0.1:8000` | Local MemoryOS endpoint |
+| `MEMORYOS_AUTH_TOKEN` | none | Local MemoryOS bearer token |
+| `MEMORYOS_CONDITION` | `msc_progressive` | Context-delivery condition |
+| `MEMORYOS_BUDGET_TOKENS` | `6000` | MemoryOS response budget |
+| `MEMORYOS_MAX_CONTEXT_CALLS` | unlimited | Per-session context-call ceiling; `0` means unlimited |
+| `MEMORYOS_RESPONSE_FORMAT` | `json` | `json`, `deepseek-compact`, or progressive compact mode |
+| `MEMORYOS_TOOL_PROFILE` | `read-only` | `read-only` or explicit `cross-session-write` |
+| `MEMORYOS_REPOSITORY` | none | Fixed repository scope; required for writes |
+| `MEMORYOS_TASK` | none | Controller-owned task description |
+| `MEMORYOS_TIMEOUT_MS` | `30000` | Local MemoryOS request timeout |
+
+Usage-ledger and controlled-eviction variables are evaluation infrastructure;
+see [`cordis.patch.yml`](cordis.patch.yml) and the architecture document before
+enabling them.
+
+## Verify and remove
+
+```console
+node --test tests/contract.test.mjs tests/loader-composition.test.mjs
+dsh --profile memoryos --dump-config
+dsh plugin --profile memoryos remove dsh-memoryos
+```
+
+The Loader/HMR test runs automatically when `DSH_TEST_PROFILE_DIR` points to an
+installed RC5 profile. Local contributor scripts pack a tarball before install;
+a direct directory install becomes a `link:` dependency and is unsupported.
+
+## Known limitations
+
+- Process-wide enablement means concurrent enabled and disabled Agents should
+  use separate DSH launches.
+- The plugin is intentionally coupled to RC5 Cordis lifecycle and event surfaces.
+- Profiles without `headless-runner` can emit a non-fatal missing-entry warning
+  for the optional resume overlay during `--dump-config`; memory tools, usage
+  collection, and Loader/HMR composition still pass. The overlay is only needed
+  for controlled continuation benchmarks.
+- The controlled history-eviction hook is evaluation-only.
+- Memory guidance remains evidence, not authority; verify code-related facts in
+  the checkout and run tests.
+
+See [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), and the
+[MIT license](LICENSE).

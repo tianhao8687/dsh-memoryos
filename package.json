@@ -1,7 +1,7 @@
 {
   "name": "dsh-memoryos",
   "version": "0.1.18",
-  "description": "MemoryOS context and usage tools for DeepSeek Harness",
+  "description": "Evidence-first long-term project memory for DeepSeek Harness",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -18,7 +18,10 @@
     "examples/",
     "cordis.patch.yml",
     "harness-lock.json",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "docs/"
   ],
   "scripts": {
     "test": "node --test tests/contract.test.mjs tests/loader-composition.test.mjs",
@@ -52,5 +55,22 @@
       "patch": "./cordis.patch.yml"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tianhao8687/dsh-memoryos.git"
+  },
+  "homepage": "https://github.com/tianhao8687/dsh-memoryos#readme",
+  "bugs": {
+    "url": "https://github.com/tianhao8687/dsh-memoryos/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "agent-memory",
+    "long-term-memory",
+    "memoryos",
+    "cordis"
+  ],
   "license": "MIT"
 }
